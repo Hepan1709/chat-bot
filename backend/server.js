@@ -1,108 +1,217 @@
+// ============================================================
+//  server.js  –  AI Chatbot Backend
+//  Uses Groq API for: chat, summarization, content generation
+// ============================================================
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
+// ─── Constants ───────────────────────────────────────────────
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// Groq API endpoint
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+// One model used for all 3 features
+const MODEL = "llama-3.3-70b-versatile";
+
+// Max reply length per feature (controls cost + speed)
+const MAX_TOKENS = {
+  chat: 500,
+  summary: 300,
+  content: 800,
+};
+
+// ─── Middleware ───────────────────────────────────────────────
+
+// Allow requests from your frontend
+app.use(cors({ origin: process.env.FRONTEND_URL || "*" }));
+
+// Parse incoming JSON request bodies automatically
 app.use(express.json());
 
-//  In-memory chat history (session)
-let chatHistory = [
-  {
-    role: "system",
-    content: "You are a helpful assistant. Do not mention knowledge cutoff."
-  }
-];
-
-//  Retry function for API calls
-async function fetchWithRetry(url, options, retries = 2) {
-  try {
-    return await fetch(url, options);
-  } catch (err) {
-    if (retries === 0) throw err;
-    console.log("Retrying API call...");
-    return fetchWithRetry(url, options, retries - 1);
-  }
-}
-
-//  Health check route
-app.get("/", (req, res) => {
-  res.send("Chatbot backend is running 🚀");
+// Rate limiter: max 30 requests per minute per IP
+// Protects your Groq API key from abuse
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { reply: "Too many requests. Please slow down. ⏳" },
 });
+app.use(limiter);
 
-//  Chat API
-app.post("/chat", async (req, res) => {
+// ─── Shared Groq API Helper ───────────────────────────────────
+/**
+ * callGroq()
+ * Single reusable function for ALL Groq API calls.
+ * Handles retries automatically on rate limits and server errors.
+ *
+ * @param {Array}  messages  - [{role, content}] conversation array
+ * @param {number} maxTokens - max length of the AI reply
+ * @param {number} retries   - auto-retry count (default 2)
+ */
+async function callGroq(messages, maxTokens, retries = 2) {
   try {
-    const userMessage = req.body.message;
-
-    //  1. Validate input
-    if (!userMessage || userMessage.trim() === "") {
-      return res.status(400).json({
-        reply: "Message cannot be empty ❗"
-      });
-    }
-
-    //  2. Add user message to history
-    chatHistory.push({
-      role: "user",
-      content: userMessage
+    const response = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({ model: MODEL, messages, max_tokens: maxTokens }),
     });
 
-    //  3. Call Groq API
-    const response = await fetchWithRetry(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: chatHistory
-        })
-      }
-    );
-
-    //  4. Check response
     if (!response.ok) {
-      throw new Error("Groq API request failed");
+      const errBody = await response.json().catch(() => ({}));
+      const status = response.status;
+
+      // 429 = Groq rate limited us — wait 2s then retry
+      if (status === 429 && retries > 0) {
+        console.warn("Groq rate limit hit. Retrying in 2s...");
+        await new Promise((r) => setTimeout(r, 2000));
+        return callGroq(messages, maxTokens, retries - 1);
+      }
+
+      // 5xx = Groq server error — retry immediately
+      if (status >= 500 && retries > 0) {
+        console.warn(`Groq ${status} error. Retrying...`);
+        return callGroq(messages, maxTokens, retries - 1);
+      }
+
+      throw new Error(errBody?.error?.message || `Groq API error ${status}`);
     }
 
     const data = await response.json();
-    console.log("API RESPONSE:", data);
+    const reply = data?.choices?.[0]?.message?.content ?? "No response.";
 
-    //  5. Extract reply safely
-    let reply = "No response from AI";
+    // Log token usage to track Groq usage over time
+    console.log(
+      `[tokens] prompt=${data.usage?.prompt_tokens} ` +
+        `completion=${data.usage?.completion_tokens} ` +
+        `total=${data.usage?.total_tokens}`,
+    );
 
-    if (data?.choices?.length > 0) {
-      reply = data.choices[0].message.content;
+    return reply;
+  } catch (err) {
+    if (retries > 0) {
+      console.warn("Network error, retrying...", err.message);
+      return callGroq(messages, maxTokens, retries - 1);
     }
+    throw err;
+  }
+}
 
-    //  6. Save bot reply in history
-    chatHistory.push({
-      role: "assistant",
-      content: reply
-    });
+// ─── Input Validation Helper ──────────────────────────────────
+/**
+ * validateText()
+ * Returns an error string if input is empty or too long.
+ * Returns null if input is fine.
+ */
+function validateText(text, maxLen = 2000) {
+  if (!text || typeof text !== "string" || text.trim() === "") {
+    return "Text cannot be empty. ❗";
+  }
+  if (text.length > maxLen) {
+    return `Text too long. Max ${maxLen} characters. ❗`;
+  }
+  return null;
+}
 
-    //  7. Send response to frontend
+// ─── Routes ──────────────────────────────────────────────────
+
+// Health check
+app.get("/", (_req, res) => {
+  res.json({ status: "ok", message: "AI Chatbot backend is running 🚀" });
+});
+
+// ── 1. Chat ──────────────────────────────────────────────────
+// Receives: { message: string, history: [{role, content}] }
+// Returns:  { reply: string }
+app.post("/chat", async (req, res) => {
+  try {
+    const { message, history = [] } = req.body;
+
+    const err = validateText(message, 500);
+    if (err) return res.status(400).json({ reply: err });
+
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are a helpful, concise assistant. Give clear answers. Do not mention your knowledge cutoff.",
+      },
+      ...history,
+      { role: "user", content: message },
+    ];
+
+    const reply = await callGroq(messages, MAX_TOKENS.chat);
     res.json({ reply });
-
   } catch (error) {
-    console.error("ERROR:", error);
-
-    res.status(500).json({
-      reply: "Server error. Please try again ⚠️"
-    });
+    console.error("[/chat error]", error.message);
+    res.status(500).json({ reply: "Server error. Please try again. ⚠️" });
   }
 });
 
-// 🚀 Start server
+// ── 2. Summarize ─────────────────────────────────────────────
+// Receives: { text: string }
+// Returns:  { summary: string }
+app.post("/summarize", async (req, res) => {
+  try {
+    const { text } = req.body;
+
+    const err = validateText(text, 5000);
+    if (err) return res.status(400).json({ summary: err });
+
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are a summarization assistant. Summarize the text the user provides in 3 to 5 bullet points. Be concise. Use plain English.",
+      },
+      { role: "user", content: text },
+    ];
+
+    const summary = await callGroq(messages, MAX_TOKENS.summary);
+    res.json({ summary });
+  } catch (error) {
+    console.error("[/summarize error]", error.message);
+    res
+      .status(500)
+      .json({ summary: "Could not summarize. Please try again. ⚠️" });
+  }
+});
+
+// ── 3. Content Generation ────────────────────────────────────
+// Receives: { prompt: string, tone?: string, type?: string }
+// Returns:  { content: string }
+app.post("/generate", async (req, res) => {
+  try {
+    const { prompt, tone = "professional", type = "paragraph" } = req.body;
+
+    const err = validateText(prompt, 1000);
+    if (err) return res.status(400).json({ content: err });
+
+    const messages = [
+      {
+        role: "system",
+        content: `You are a content writing assistant. Write in a ${tone} tone. Output format: ${type}. Do not add titles or explanations — just the content itself.`,
+      },
+      { role: "user", content: prompt },
+    ];
+
+    const content = await callGroq(messages, MAX_TOKENS.content);
+    res.json({ content });
+  } catch (error) {
+    console.error("[/generate error]", error.message);
+    res.status(500).json({ content: "Could not generate content. ⚠️" });
+  }
+});
+
+// ─── Start Server ─────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running → http://localhost:${PORT}`);
 });
