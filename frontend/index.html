@@ -7,31 +7,29 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
- 
+
 <div class="chat-container">
- 
+
   <div class="chat-header">
     🤖 AI Chatbot
   </div>
- 
+
   <div id="chat-box" class="chat-box"></div>
- 
+
   <div class="chat-input">
     <input
       type="text"
       id="user-input"
-      placeholder="Type a message..."
+      placeholder="Type a message or paste text to summarize..."
     />
+    <button id="summarize-btn" title="Summarize your text">✦ Summarize</button>
     <button id="send-btn">Send</button>
   </div>
- 
+
 </div>
- 
+
 <!-- apiService.js MUST come before script.js -->
-<!-- script.js uses the functions defined in apiService.js -->
 <script src="apiService.js"></script>
 <script src="script.js"></script>
- 
 </body>
 </html>
- 

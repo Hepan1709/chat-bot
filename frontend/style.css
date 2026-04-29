@@ -11,7 +11,6 @@ body {
 
 .chat-container {
   max-width: 500px;
-  width: 90vw;
   height: 95vh;
   margin: 10px auto;
   display: flex;
@@ -64,7 +63,7 @@ body {
   margin-top: 5px;
 }
 
-/* Input */
+/* Input area */
 .chat-input {
   display: flex;
   border-top: 1px solid #ddd;
@@ -77,7 +76,8 @@ body {
   outline: none;
 }
 
-.chat-input button {
+/* Send button */
+#send-btn {
   padding: 12px 15px;
   border: none;
   background: #4a90e2;
@@ -85,8 +85,29 @@ body {
   cursor: pointer;
 }
 
-.chat-input button:hover {
-  background: #357abd;
+#send-btn:hover { background: #357abd; }
+
+/* Summarize button */
+#summarize-btn {
+  padding: 12px 13px;
+  border: none;
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+  background: #f4f6f9;
+  color: #4a90e2;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+#summarize-btn:hover { background: #364f71; }
+
+#summarize-btn:disabled,
+#send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Typing animation */
