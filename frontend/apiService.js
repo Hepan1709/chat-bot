@@ -3,7 +3,9 @@
 
 
 // Backend URL
-const BASE_URL = "http://localhost:3000";
+const BASE_URL = window.location.hostname === "localhost"
+  ? "http://localhost:3000"
+  : "https://backend-three-rho-77.vercel.app";
 
 /*
  Handles every request to the backend.
