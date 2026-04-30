@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI Image Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="generate.css" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <a href="index.html" class="back-link">← Back to Chat</a>
+        <h1>🎨 AI Image Generator</h1>
+      </div>
+
+      <!-- Input area -->
+      <div class="card">
+        <label class="label">Prompt</label>
+        <textarea
+          id="prompt"
+          placeholder="A golden retriever puppy sitting in a sunflower field..."
+        ></textarea>
+
+        <label class="label">Style</label>
+        <div class="chips" id="style-chips">
+          <button class="chip active" data-value="photorealistic">
+            Photorealistic
+          </button>
+          <button class="chip" data-value="digital art">Digital Art</button>
+          <button class="chip" data-value="anime">Anime</button>
+          <button class="chip" data-value="oil painting">Oil Painting</button>
+          <button class="chip" data-value="3D render">3D Render</button>
+          <button class="chip" data-value="sketch">Sketch</button>
+        </div>
+
+        <label class="label"
+          >Variations — <span id="count-label">1</span></label
+        >
+        <input type="range" id="count" min="1" max="4" value="1" />
+
+        <div class="btn-row">
+          <button id="clear-btn" class="btn-clear">Clear</button>
+          <button id="generate-btn" class="btn-generate">Generate</button>
+        </div>
+      </div>
+
+      <!-- Error message -->
+      <div id="error-box" class="error hidden"></div>
+
+      <!-- Results -->
+      <div id="results" class="hidden">
+        <div class="results-header">
+          <span class="label">Results</span>
+          <button id="regen-btn" class="btn-regen">↻ Regenerate</button>
+        </div>
+        <div id="image-grid" class="grid"></div>
+      </div>
+    </div>
+
+    <script src="generate.js"></script>
+  </body>
+</html>
